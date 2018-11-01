@@ -2,7 +2,7 @@
 
 /**
  * Implements hook_install_tasks()
- * 
+ *
  * We add a simple install task that allows users to specify that this site is
  * not a standard Drupal site.
  */
@@ -21,15 +21,60 @@ function scratchpad_2_install_tasks(&$install_state){
 }
 
 /**
- * 
+ * These fields will only be visible for a manual install, so they will (probably) never be seen.
+ * However, we define them so that they can be filled in by the aegir install process, which we hook into.
  */
 function scratchpad_2_standard_scratchpad(){
+  // State condition for when the standard checkbox is checked
+  $when_standard_checked = array(
+    ':input[name="standard_scratchpad"]' => array(
+      'checked' => TRUE
+    )
+  );
+
+  // States to hide a field when standard is not checked
+  $standard_only_states = array(
+    'visible' => $when_standard_checked,
+    'required' => $when_standard_checked
+  );
+
   return array(
     'standard_scratchpad' => array(
       '#type' => 'checkbox',
       '#default_value' => 1,
       '#title' => 'Standard Scratchpad',
       '#description' => 'Uncheck this box if you are installing a Scratchpad on your own server.'
+    ),
+    // These are the fields we fill in using site_data
+    'client_title' => array(
+      '#type' => 'textfield',
+      '#title' => 'Client title',
+      '#description' => 'The personal title of the primary maintainer of this scratchpad (e.g. Ms, Mr, Mx, Prof., etc)',
+      '#states' => $standard_only_states
+    ),
+    'client_name' => array(
+      '#type' => 'textfield',
+      '#title' => 'Client name',
+      '#description' => 'The full name of the primary maintainer of this scratchapd.',
+      '#states' => $standard_only_states
+    ),
+    'client_email' => array(
+      '#type' => 'textfield',
+      '#title' => 'Client email',
+      '#description' => 'The email address of the primary maintainer of this scratchpad.',
+      '#states' => $standard_only_states
+    ),
+    'client_country' => array(
+      '#type' => 'textfield',
+      '#title' => 'Client country',
+      '#description' => 'The country of residence of the primary maintainer of this scratchpad.',
+      '#states' => $standard_only_states
+    ),
+    'client_institution' => array(
+      '#type' => 'textfield',
+      '#title' => 'Client institution',
+      '#description' => 'The institution to which the primary maintainer of this scratchpad belongs.',
+      '#states' => $standard_only_states
     ),
     'actions' => array(
       '#type' => 'actions',
@@ -43,10 +88,127 @@ function scratchpad_2_standard_scratchpad(){
 }
 
 /**
+ * Create the primary maintainer account (id #2)
+ */
+function scratchpad_2_create_maintainer($client_name, $client_email, $client_title, $client_country, $client_institution) {
+  $account = new stdClass();
+  $account->is_new = TRUE;
+  $account->name = $client_name;
+  $account->mail = $client_email;
+  $account->status = 1;
+  $account->roles = array(
+    5 => TRUE
+  );
+  $account->pass = user_hash_password(uniqid());
+  $account->field_user_title[LANGUAGE_NONE][] = array(
+    'value' => $client_title
+  );
+  // Can the following be removed? What is it doing there?  Need to test it's
+  // actually not doing anything.
+  drupal_write_record('legal_accepted', $record);
+  // Try to set the country based on what was entered in the drop down.
+  $row = db_select('countries_country', 'c')->fields('c', array(
+    'cid'
+  ))->condition('name', $client_country)->execute()->fetch();
+  if($row && count($row)){
+    $account->field_user_country[LANGUAGE_NONE][] = countries_load($row->cid);
+  }
+  $name_parts = explode(' ', $account->name);
+  if(count($name_parts) > 1){
+    $account->field_user_family_name[LANGUAGE_NONE][] = array(
+      'value' => array_pop($name_parts)
+    );
+  }
+  $account->field_user_given_names[LANGUAGE_NONE][] = array(
+    'value' => implode(' ', $name_parts)
+  );
+  if($client_institution){
+    $account->field_user_institution[LANGUAGE_NONE][] = array(
+      'value' => $client_institution
+    );
+  }
+  user_save($account);
+}
+
+/**
  * Form submission handler for scratchpad_2_standard_scratchpad().
  */
 function scratchpad_2_standard_scratchpad_submit($form, &$form_state){
-  if(isset($form_state['values']['standard_scratchpad']) && !$form_state['values']['standard_scratchpad']){
+  $values = $form_state['values'];
+
+  if(isset($values['standard_scratchpad']) && !$values['standard_scratchpad']){
     variable_set('standard_scratchpad', FALSE);
+  } else {
+    scratchpad_2_create_maintainer(
+      $values['client_name'],
+      $values['client_email'],
+      $values['client_title'],
+      $values['client_country'],
+      $values['client_institution']
+    );
+
+    // Ensure this Scratchpads Team can not login directly.
+    db_update('users')->fields(array(
+      'pass' => ''
+    ))->condition('uid', 1)->execute();
+
+    // Finally, we uninstall the update module which is annoying, and not actually
+    // required.
+    module_disable(array(
+      'update'
+    ), FALSE);
   }
+}
+
+/**
+ * Implements hook_mail_alter().
+ * In which we override the mail params to reference user #2 (maintainer),
+ * intead of user #1 (Scratchpads Team)
+ */
+function scratchpad_2_mail_alter(&$message){
+  // install_welcome-admin is only sent when we install through aegir
+  if($message['id'] == 'install_welcome-admin'){
+    // The scratchpad admin is always id 2
+    $account = user_load(2);
+
+    if ($account && variable_get('standard_scratchpad', TRUE)) {
+      $onetime = user_pass_reset_url($account);
+      $message['to'] = $account->mail;
+
+      $message['params']['username'] = $account->name;
+      $message['params']['login_url'] = $onetime;
+      $message['params']['mailto'] = $account->mail;
+      $message['params']['edit_uri'] = url('user/'. $account->uid .'/edit', array('absolute' => TRUE)));
+    }
+
+    $message['from'] = '"Scratchpads Team" <no-reply@scratchpads.eu>';
+    $message['headers']['From'] = $message['from'];
+    $message['headers']['Sender'] = $message['from'];
+    $message['headers']['Return-Path'] = $message['from'];
+  }
+}
+
+/**
+ * Implements hook_provision_drupal_install_settings_alter()
+ * Override the install parameters - these are the values that go into the install form
+ */
+function scratchpad_2_provision_drupal_install_settings_alter(&$settings, $url) {
+  $alias = drush_get_context('alias');
+  $site_data = $alias['site_data'];
+
+  // Site name is given by site data
+  $settings['install_configure_form']['site_name'] = !empty($site_data['site_title']) ? $site_data['site_title'] : FALSE;
+
+  // First user should be Scratchpad Team
+  $settings['install_configure_form']['account']['name'] = 'Scratchpad Team';
+  $settings['install_configure_form']['account']['mail'] = 'scratchpad@nhm.ac.uk';
+
+  // Second user is the client
+  $settings['scratchpad_2_standard_scratchpad'] = array(
+    'client_title' => $site_data['client_title'],
+    'client_name' => $site_data['client_name'],
+    'client_email' => $site_data['client_email'],
+    'client_country' => $site_data['client_country'],
+    'client_institution' => $site_data['client_institution']
+  );
 }
