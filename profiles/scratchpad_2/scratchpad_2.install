@@ -178,7 +178,7 @@ function scratchpad_2_mail_alter(&$message){
       $message['params']['username'] = $account->name;
       $message['params']['login_url'] = $onetime;
       $message['params']['mailto'] = $account->mail;
-      $message['params']['edit_uri'] = url('user/'. $account->uid .'/edit', array('absolute' => TRUE)));
+      $message['params']['edit_uri'] = url('user/'. $account->uid .'/edit', array('absolute' => TRUE));
     }
 
     $message['from'] = '"Scratchpads Team" <no-reply@scratchpads.eu>';
