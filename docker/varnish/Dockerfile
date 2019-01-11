@@ -1,10 +1,8 @@
-# FROM dockerimages/docker-varnish
-
 FROM alpine:3.7
 
 RUN apk update && \
     apk upgrade && \
-	apk add varnish
+    apk add varnish
 
 
 COPY default.vcl /etc/varnish/default.vcl

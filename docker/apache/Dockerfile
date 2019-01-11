@@ -4,20 +4,21 @@ WORKDIR /var/www/html
 
 RUN apt-get update
 RUN apt-get -y install wget \
-             libxml2-dev \
-             git \
-             nano \
-             libpng-dev \
-             libmagickwand-dev \
-             imagemagick \
-             libgmp-dev \
-             zlib1g-dev \
-             ssmtp \
-             libfreetype6-dev \
-             libjpeg62-turbo-dev \
-             libgd-dev cron \
-             msmtp \
-             --no-install-recommends
+    apt-utils \
+    libxml2-dev \
+    git \
+    nano \
+    libpng-dev \
+    libmagickwand-dev \
+    imagemagick \
+    libgmp-dev \
+    zlib1g-dev \
+    ssmtp \
+    libfreetype6-dev \
+    libjpeg62-turbo-dev \
+    libgd-dev cron \
+    msmtp \
+    --no-install-recommends
 
 RUN pecl install uploadprogress
 RUN docker-php-ext-enable uploadprogress
@@ -37,15 +38,18 @@ RUN docker-php-ext-configure gd \
 RUN docker-php-ext-install pdo_mysql gd mbstring gmp zip
 
 RUN apt-get install -y \
-        libmcrypt-dev \
+    libmcrypt-dev \
     && docker-php-ext-install mcrypt \
     && apt-get remove -y \
-        libmcrypt-dev \
+    libmcrypt-dev \
     && apt-get install -y \
-        libmcrypt4 \
-&& apt-get autoremove -y
+    libmcrypt4 \
+    && apt-get autoremove -y
 
 RUN apt-get install -y mysql-client
+
+# Install soap
+RUN docker-php-ext-install soap
 
 # Enable mod_rewrite
 RUN a2enmod rewrite
